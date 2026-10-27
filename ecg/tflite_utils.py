@@ -1,5 +1,7 @@
 """TFLite conversion, batched inference and on-device cost estimates (MACs, peak activation RAM)."""
 
+import tempfile
+
 import numpy as np
 import tensorflow as tf
 
@@ -25,6 +27,13 @@ def convert(converter, rep_data=None):
         converter.inference_input_type = tf.int8
         converter.inference_output_type = tf.int8
     return converter.convert()
+
+
+def keras_to_tflite(model, rep_data=None):
+    """Convert a Keras 3 model via a SavedModel export; INT8 when rep_data is given, else float32."""
+    with tempfile.TemporaryDirectory() as saved:
+        model.export(saved, verbose=False)
+        return convert(tf.lite.TFLiteConverter.from_saved_model(saved), rep_data)
 
 
 class TFLiteClassifier:
@@ -73,6 +82,19 @@ def _graph(path):
     tensors = {t["index"]: t for t in interp.get_tensor_details()}
     ops = interp._get_ops_details()
     return interp, tensors, ops
+
+
+def weight_bytes(path):
+    """Bytes of constant op inputs (weights, biases, normalization constants).
+
+    Counting op inputs rather than every non-activation tensor leaves out the interpreter's
+    conv scratch buffers, which are working memory, not part of the model.
+    """
+    interp, tensors, ops = _graph(path)
+    produced = {t for op in ops for t in op["outputs"]}
+    inputs = {d["index"] for d in interp.get_input_details()}
+    consts = {t for op in ops for t in op["inputs"] if t >= 0} - produced - inputs
+    return sum(int(np.prod(tensors[t]["shape"])) * np.dtype(tensors[t]["dtype"]).itemsize for t in consts)
 
 
 def count_macs(path):

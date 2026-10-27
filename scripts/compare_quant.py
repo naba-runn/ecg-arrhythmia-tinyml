@@ -14,12 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import keras  # noqa: E402
-import numpy as np  # noqa: E402
 
 from ecg import config as C  # noqa: E402
 from ecg.features import load_split  # noqa: E402
 from ecg.metrics import summarize  # noqa: E402
-from ecg.tflite_utils import TFLiteClassifier, count_macs, peak_activation_bytes  # noqa: E402
+from ecg.tflite_utils import TFLiteClassifier, count_macs, peak_activation_bytes, weight_bytes  # noqa: E402
 
 QUANT_DIR = C.ROOT / "outputs" / "quant"
 MODELS = ["fp32", "ptq_int8", "qat_int8"]
@@ -27,16 +26,6 @@ MODELS = ["fp32", "ptq_int8", "qat_int8"]
 # ESP32-WROOM-32E: 520 KB on-chip SRAM, 4 MB flash on the smallest module variant.
 ESP32_SRAM = 520 * 1024
 ESP32_FLASH = 4 * 1024 * 1024
-
-
-def weight_bytes(path):
-    """Bytes of constant tensors (weights, biases, normalization constants)."""
-    import tensorflow as tf
-    interp = tf.lite.Interpreter(model_path=str(path))
-    produced = {t for op in interp._get_ops_details() for t in op["outputs"]}
-    inputs = {d["index"] for d in interp.get_input_details()}
-    return sum(int(np.prod(t["shape"])) * np.dtype(t["dtype"]).itemsize
-               for t in interp.get_tensor_details() if t["index"] not in produced | inputs)
 
 
 def main():
