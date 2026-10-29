@@ -48,7 +48,13 @@ BANDPASS_HZ = (0.5, 40.0)
 # RR features: local average over the previous N beats, long-term average over the previous window.
 LOCAL_RR_BEATS = 10
 LONG_RR_SECONDS = 300
-RR_FEATURES = ["pre_rr", "post_rr", "local_rr", "long_rr"]
+RR_FEATURES = ["pre_rr", "post_rr", "local_rr", "long_rr", "rr_cv", "rr_succ_diff"]
+
+# Rhythm irregularity (coefficient of variation and mean successive difference, both relative to
+# the mean RR) over the intervals before the current beat. High in atrial fibrillation, low in a
+# regular rhythm with an isolated premature beat.
+IRREG_RR_BEATS = 10
+IRREG_CLIP = (0.0, 1.0)
 
 # Physiological limits for the model's RR inputs. Gaps in the beat annotations (unreadable signal
 # stretches) otherwise produce "RR intervals" of up to 100 s, which distort the normalization and

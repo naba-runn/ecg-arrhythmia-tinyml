@@ -1,5 +1,7 @@
 """Training helpers shared by float training and quantization-aware training."""
 
+import functools
+
 import numpy as np
 import tensorflow as tf
 
@@ -14,9 +16,9 @@ def class_weights(labels, power, max_weight):
     return np.minimum(w, max_weight)
 
 
-def make_dataset(x, y, w, batch_size, use_augment, seed):
+def make_dataset(x, y, w, batch_size, use_augment, seed, n_abs=4):
     ds = tf.data.Dataset.from_tensor_slices((x, y, w)).shuffle(len(y), seed=seed, reshuffle_each_iteration=True)
     ds = ds.batch(batch_size)
     if use_augment:
-        ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.map(functools.partial(augment, n_abs=n_abs), num_parallel_calls=tf.data.AUTOTUNE)
     return ds.prefetch(tf.data.AUTOTUNE)

@@ -24,10 +24,12 @@ def bandpass(signal, fs=C.FS, band=C.BANDPASS_HZ, order=4):
 
 
 def rr_features(r_peaks, fs=C.FS):
-    """Per-beat RR features in seconds, using only past beats except for post_rr.
+    """Per-beat RR features, using only past beats except for post_rr.
 
-    Returns an array of shape (n_beats, 4); rows for the first and last beat are NaN
-    because pre_rr / post_rr are undefined there.
+    Columns follow C.RR_FEATURES: four intervals in seconds, then two rhythm-irregularity
+    measures over the C.IRREG_RR_BEATS intervals before the current one (the current beat's own
+    pre_rr is left out, so a single premature beat does not count as an irregular rhythm).
+    Rows for the first and last beat are NaN because pre_rr / post_rr are undefined there.
     """
     t = r_peaks / fs
     rr = np.diff(t)
@@ -39,14 +41,23 @@ def rr_features(r_peaks, fs=C.FS):
         past = rr[:i]
         local = past[-C.LOCAL_RR_BEATS:].mean()
         long_window = past[t[1:i + 1] >= t[i] - C.LONG_RR_SECONDS]
-        feats[i] = (pre, post, local, long_window.mean())
+
+        # Clipped so annotation gaps don't register as irregularity.
+        context = np.clip(past[-(C.IRREG_RR_BEATS + 1):-1], *C.RR_CLIP_S)
+        if len(context) >= 2:
+            cv = context.std() / context.mean()
+            succ_diff = np.abs(np.diff(context)).mean() / context.mean()
+        else:
+            cv = succ_diff = 0.0
+        feats[i] = (pre, post, local, long_window.mean(), cv, succ_diff)
     return feats
 
 
 def extract_beats(record_id):
     """Segment all AAMI-classifiable beats of one record.
 
-    Returns a dict with beats (n, BEAT_LEN), rr (n, 4), labels (n,) and the original symbols.
+    Returns a dict with beats (n, BEAT_LEN), rr (n, len(C.RR_FEATURES)), labels (n,) and the
+    original symbols.
     """
     signal, samples, symbols = load_record(record_id)
     signal = bandpass(signal)

@@ -5,6 +5,7 @@ Each run is saved under outputs/runs/<tag>/seed<k>/, with a summary of validatio
 (mean and std across seeds) in outputs/runs/<tag>/summary.json.
 
 Usage: python scripts/train.py --tag base --seeds 0 1 2 [--weight-power 0.5] [--augment]
+                               [--rr-set base|full|causal] [--global-max]
 """
 
 import argparse
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import keras  # noqa: E402
 
 from ecg import config as C  # noqa: E402
-from ecg.features import RR_INPUTS, load_split  # noqa: E402
+from ecg.features import N_ABSOLUTE, RR_SETS, load_split  # noqa: E402
 from ecg.metrics import format_report, summarize  # noqa: E402
 from ecg.model import build_model  # noqa: E402
 from ecg.training import class_weights, make_dataset  # noqa: E402
@@ -58,11 +59,11 @@ def train_one(args, seed, x_tr, y_tr, x_va, y_va, weights, out_dir):
     steps = int(np.ceil(len(y_tr) / args.batch_size)) * args.epochs
     lr = keras.optimizers.schedules.CosineDecay(args.lr, decay_steps=steps, alpha=0.05)
 
-    model = build_model(x_tr["rr"], n_rr=len(RR_INPUTS))
+    model = build_model(x_tr["rr"], n_rr=len(RR_SETS[args.rr_set]), global_max=args.global_max)
     model.compile(optimizer=keras.optimizers.Adam(lr), loss="sparse_categorical_crossentropy")
 
     sample_w = weights[y_tr].astype(np.float32)
-    ds = make_dataset(x_tr, y_tr, sample_w, args.batch_size, args.augment, seed)
+    ds = make_dataset(x_tr, y_tr, sample_w, args.batch_size, args.augment, seed, n_abs=N_ABSOLUTE[args.rr_set])
     selector = SelectOnValidation(x_va, y_va, args.patience)
     model.fit(ds, epochs=args.epochs, callbacks=[selector], verbose=0)
 
@@ -90,11 +91,13 @@ def main():
     p.add_argument("--max-class-weight", type=float, default=25.0)
     p.add_argument("--augment", action="store_true")
     p.add_argument("--patience", type=int, default=15)
+    p.add_argument("--rr-set", choices=list(RR_SETS), default="base")
+    p.add_argument("--global-max", action="store_true")
     args = p.parse_args()
 
     run_dir = RUNS_DIR / args.tag
-    x_tr, y_tr, _ = load_split("train")
-    x_va, y_va, _ = load_split("val")
+    x_tr, y_tr, _ = load_split("train", args.rr_set)
+    x_va, y_va, _ = load_split("val", args.rr_set)
 
     weights = class_weights(y_tr, args.weight_power, args.max_class_weight)
     print(f"[{args.tag}] class weights:", {c: round(float(w), 2) for c, w in zip(C.CLASSES, weights)})

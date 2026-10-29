@@ -5,11 +5,13 @@ On a microcontroller the members run one after another in the same tensor arena,
 activation RAM is that of one member while weights and MACs add up.
 
 Reports single-model results (mean ± std over seeds) next to the ensemble, on validation and DS2.
-Outputs outputs/ensemble/seed<k>_int8.tflite and outputs/ensemble/report.json.
+Outputs go to outputs/ensemble/<tag>/: seed<k>_int8.tflite, report.json and the ensemble's
+averaged class probabilities in probs.npz (used by tune_threshold.py).
 
-Usage: python scripts/ensemble.py
+Usage: python scripts/ensemble.py [--tag <run>] [--val-only]
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -48,17 +50,26 @@ def row(label, summaries):
 
 
 def main():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    tag = json.loads((C.ROOT / "outputs" / "results.json").read_text())["tag"]
-    seeds = json.loads((C.ROOT / "outputs" / "runs" / tag / "summary.json").read_text())["args"]["seeds"]
-    x_tr, _, _ = load_split("train")
-    data = {split: load_split(split) for split in ("val", "test")}
+    p = argparse.ArgumentParser()
+    p.add_argument("--tag", help="training run (default: the run evaluated in outputs/results.json)")
+    p.add_argument("--val-only", action="store_true", help="skip DS2, for choosing between runs")
+    args = p.parse_args()
+
+    tag = args.tag or json.loads((C.ROOT / "outputs" / "results.json").read_text())["tag"]
+    train_args = json.loads((C.ROOT / "outputs" / "runs" / tag / "summary.json").read_text())["args"]
+    seeds, rr_set = train_args["seeds"], train_args.get("rr_set", "base")
+    out_dir = OUT_DIR / tag
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    x_tr, _, _ = load_split("train", rr_set)
+    splits = ("val",) if args.val_only else ("val", "test")
+    data = {split: load_split(split, rr_set) for split in splits}
 
     probs = {(kind, split): [] for kind in ("fp32", "int8") for split in data}
     costs = []
     for seed in seeds:
         model = keras.models.load_model(C.ROOT / "outputs" / "runs" / tag / f"seed{seed}" / "model.keras")
-        path = OUT_DIR / f"seed{seed}_int8.tflite"
+        path = out_dir / f"seed{seed}_int8.tflite"
         path.write_bytes(keras_to_tflite(model, representative_dataset(x_tr)))
         costs.append({"file_bytes": path.stat().st_size, "weight_bytes": weight_bytes(path),
                       "macs": count_macs(path), "peak_activation_bytes": peak_activation_bytes(path)})
@@ -67,8 +78,10 @@ def main():
             probs["fp32", split].append(model.predict(x, batch_size=1024, verbose=0))
             probs["int8", split].append(int8.predict(x))
 
-    report = {"tag": tag, "seeds": seeds, "results": {}}
-    for split, title in [("val", "Validation (DS1 hold-out)"), ("test", "Test (DS2, inter-patient)")]:
+    report = {"tag": tag, "seeds": seeds, "rr_set": rr_set, "results": {}}
+    titles = {"val": "Validation (DS1 hold-out)", "test": "Test (DS2, inter-patient)"}
+    for split in splits:
+        title = titles[split]
         y = data[split][1]
         print(f"\n{title}\n{header()}")
         for kind in ("fp32", "int8"):
@@ -78,7 +91,8 @@ def main():
             print(row(f"{kind} single (n={len(seeds)})", singles))
             print(row(f"{kind} ensemble", [ens]))
 
-    print("\n" + format_report(report["results"]["test_int8"]["ensemble"], "INT8 ensemble on DS2"))
+    last = splits[-1]
+    print("\n" + format_report(report["results"][f"{last}_int8"]["ensemble"], f"INT8 ensemble, {titles[last]}"))
 
     total = {
         "members": len(seeds),
@@ -93,9 +107,10 @@ def main():
           f"weights {total['weight_bytes'] / 1024:.1f} KB, {total['macs'] / 1e3:.0f}k MACs per beat, "
           f"peak activation RAM {total['peak_activation_bytes'] / 1024:.1f} KB")
 
-    with open(OUT_DIR / "report.json", "w") as f:
+    with open(out_dir / "report.json", "w") as f:
         json.dump(report, f, indent=2)
-    print(f"Saved {OUT_DIR / 'report.json'}")
+    np.savez(out_dir / "probs.npz", **{f"{kind}_{split}": np.mean(p, axis=0) for (kind, split), p in probs.items()})
+    print(f"Saved {out_dir / 'report.json'}")
 
 
 if __name__ == "__main__":
