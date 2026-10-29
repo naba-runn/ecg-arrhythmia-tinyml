@@ -4,3 +4,11 @@ data/
 outputs/
 *.pyc
 .DS_Store
+
+# LaTeX build outputs and packaged copies of the report
+report/**/*.log
+report/**/*.blg
+report/**/*.aux
+report/**/*.pdf
+!report/**/figures/*.pdf
+report/**/*.zip
