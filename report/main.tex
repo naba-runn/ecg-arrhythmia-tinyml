@@ -65,7 +65,7 @@ Reg. No. 240911023\\
 \maketitle
 
 \begin{abstract}
-Deep-learning ECG arrhythmia classifiers routinely report accuracies above 95\%, yet only 5 of 122 recent studies simultaneously follow the AAMI EC57 standard, evaluate on patients unseen during training, and assess embedded feasibility. We design, train and evaluate a lightweight one-dimensional convolutional neural network (1D-CNN) that meets all three criteria. Each heartbeat of the MIT-BIH Arrhythmia Database is classified into the five AAMI classes from its single-lead morphology and eight RR-interval features expressed relative to the patient's own rhythm. Training uses only the DS1 records; every design choice is made on a patient-wise validation hold-out from DS1, and the DS2 records serve as the inter-patient test set. The final model is an ensemble of three 4,974-parameter networks, each quantized to 8-bit integers. On DS2 it reaches 87.30\% accuracy, an SVEB sensitivity of 74.46\% with 33.43\% positive predictivity, and a VEB sensitivity of 92.89\% with 92.71\% positive predictivity. The ensemble needs 15.1~KB of INT8 weights, 0.76~million multiply-accumulates per beat and about 3.9~KB of peak activation memory, under 1\% of the 520~KB SRAM of an ESP32-WROOM-32E. INT8 quantization costs 0.1 percentage points of accuracy against the float ensemble. Error analysis attributes 86.5\% of SVEB false alarms to five test patients with atrial fibrillation or 2:1 AV block. An ablation shows that a rhythm-irregularity feature raises SVEB positive predictivity to 42.31\%. This gain could not be detected by our validation set, which contains no atrial-fibrillation records.
+Deep-learning ECG arrhythmia classifiers routinely report accuracies above 95\%, yet only 5 of 122 recent studies simultaneously follow the AAMI EC57 standard, evaluate on patients unseen during training, and assess embedded feasibility. We design, train and evaluate a lightweight one-dimensional convolutional neural network (1D-CNN) that addresses all three criteria. Each heartbeat of the MIT-BIH Arrhythmia Database is classified into the five AAMI classes from its single-lead morphology and eight RR-interval features expressed relative to the patient's own rhythm. Training uses only the DS1 records, model selection uses a five-record DS1 hold-out, and the DS2 records of the canonical DS1/DS2 record split serve as the inter-patient test set. The final model is an ensemble of three 4,974-parameter networks, each quantized to 8-bit integers. On DS2 it reaches 87.30\% accuracy, an SVEB sensitivity of 74.46\% with 33.43\% positive predictivity, and a VEB sensitivity of 92.89\% with 92.71\% positive predictivity. It recognizes no fusion (F) beat (0\% sensitivity), and two in three of its SVEB calls are false alarms. The ensemble stores 15.1~KB of INT8 weights (55.9~KB of model files) and needs 0.76~million multiply-accumulates per beat; its estimated peak activation memory is 3.9~KB, a lower bound on runtime RAM that is yet to be measured on an ESP32-WROOM-32E (520~KB SRAM). INT8 quantization costs 0.1 percentage points of accuracy against the float ensemble. Error analysis attributes 86.5\% of SVEB false alarms to five test patients with atrial fibrillation or 2:1 AV block. An ablation shows that a rhythm-irregularity feature raises SVEB positive predictivity to 42.31\%. This gain could not be detected by our validation set, which contains no atrial-fibrillation records. The frozen model was evaluated once on DS2, but DS2 had been used six times during development and one design change followed a DS2 observation, so the results are not a strictly untouched test estimate.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -88,8 +88,8 @@ Many deep-learning studies report accuracies above 95\%~\cite{xiao2023review}, b
 
 This work addresses that gap. Our contributions are:
 \begin{itemize}
-\item an AAMI-compliant 1D-CNN with patient-relative RR features, trained on DS1 and tested on the canonical DS2 split, with every model choice made on a patient-wise validation hold-out;
-\item full INT8 post-training and quantization-aware compression, with model size, operation count and peak activation memory measured against an ESP32-WROOM-32E budget;
+\item an AAMI-compliant 1D-CNN with patient-relative RR features, trained on DS1 and tested on DS2 of the canonical record split, with model selection on a DS1 hold-out;
+\item full INT8 post-training and quantization-aware compression, with model size, operation count and estimated peak activation memory compared against an ESP32-WROOM-32E budget;
 \item a three-member INT8 ensemble that removes the large seed-to-seed variance of minority-class results at a cost of 15.1~KB of weights;
 \item an error analysis tracing SVEB false alarms to atrial fibrillation (AF), with ablations of a rhythm-irregularity feature and of a causal (zero-latency) variant; and
 \item a transparent account of every use of the test set during development, together with a frozen, checksummed final model.
@@ -126,7 +126,7 @@ Ref. & Model & AAMI & Inter-pat. & Embedded evidence \\
 \cite{kim2024ultraedge} & 1D-CNN, INT8 & \cmark & \cmark$^{a}$ & Cortex-M4, 118~kB RAM \\
 \cite{farag2023tiny} & Matched-filter CNN & \cmark & \cmark & 15~kB, Raspberry Pi \\
 \midrule
-This work & 1D-CNN ens., INT8 & \cmark & \cmark & 15.1~KB weights, 3.9~KB act. \\
+This work & 1D-CNN ens., INT8 & \cmark & \cmark & 15.1~KB wts., est.\ 3.9~KB act. \\
 \bottomrule
 \multicolumn{5}{@{}l@{}}{\scriptsize $^{a}$Subject-wise, but not the canonical DS1/DS2 split.}
 \end{tabular}}
@@ -143,7 +143,7 @@ The survey leads to five gaps:
 \textbf{G5}~minority classes are hidden behind headline accuracy.
 Our objectives were:
 \textbf{O1}~a compact five-class 1D-CNN (G1, G3);
-\textbf{O2}~training on DS1 only, with model selection on a patient-wise DS1 hold-out (G1, G2);
+\textbf{O2}~training on DS1 only, with model selection on a record-disjoint DS1 hold-out (G1, G2);
 \textbf{O3}~per-class Se, +P and FPR with explicit handling of class imbalance (G5);
 \textbf{O4}~8-bit post-training and quantization-aware compression, reporting size, operations, peak activation memory and accuracy change (G3, G4); and
 \textbf{O5}~an ESP32-WROOM-32E budget and a comparison that separates DS1/DS2 results from other partitions (G2--G4).
@@ -158,7 +158,7 @@ Fig.~\ref{fig:system} shows the complete system. The upper lane is the inference
 \begin{tikzpicture}[node distance=3.5mm and 3.4mm]
 % inference lane
 \node[sDATA] (ecg) {MLII lead\\360 Hz};
-\node[sPROC, right=of ecg] (bp) {Band-pass\\0.5--40 Hz\\(Butterworth)};
+\node[sPROC, right=of ecg] (bp) {Band-pass\\0.5--40 Hz\\(zero-phase)};
 \node[sPROC, right=of bp] (seg) {Beat window\\$-$250 / +444 ms\\(250 samples)};
 \node[sPROC, right=of seg] (z) {Per-beat\\z-score};
 \node[sPROC, below=of seg, yshift=-1mm] (rr) {RR features (8)\\patient-relative,\\clipped};
@@ -183,7 +183,7 @@ Fig.~\ref{fig:system} shows the complete system. The upper lane is the inference
 \begin{scope}[on background layer]
 \node[lane, fit=(ecg)(cls)(m1)(m3)(rr)] (lane1) {};
 \end{scope}
-\node[lanelabel] at (lane1.north west) {Inference on the device (per beat)};
+\node[lanelabel] at (lane1.north west) {Inference on the device (beat $i$ is classified when R-peak $i{+}1$ arrives)};
 % development lane
 \node[sDATA, below=25mm of ecg] (db) {MIT-BIH\\48 records};
 \node[sPROC, right=of db] (split) {DS1/DS2 split\\paced excluded\\AAMI mapping};
@@ -191,19 +191,19 @@ Fig.~\ref{fig:system} shows the complete system. The upper lane is the inference
 \node[sPROC, right=of train] (sel) {Epoch \& config\\selection on\\val.\ (DS1, 5 rec.)};
 \node[sPROC, right=of sel] (ptq) {INT8 PTQ\\calibrated on\\training beats};
 \node[sPROC, right=of ptq] (frz) {Freeze\\SHA-256\\manifest};
-\node[sOUT, right=of frz] (ds2) {Evaluate once\\on DS2\\(22 rec.)};
+\node[sOUT, right=of frz] (ds2) {Evaluate frozen\\model on DS2\\(22 rec.)};
 \foreach \a/\b in {db/split, split/train, train/sel, sel/ptq, ptq/frz, frz/ds2} \draw[arr] (\a) -- (\b);
 \begin{scope}[on background layer]
 \node[lane, fit=(db)(ds2)] (lane2) {};
 \end{scope}
 \node[lanelabel] at (lane2.north west) {Offline development protocol};
 \end{tikzpicture}
-\caption{System overview. Top: per-beat inference with a three-member INT8 ensemble; the beat and its RR features feed every member. Bottom: development protocol; DS2 is used only after the model is frozen.}
+\caption{System overview. Top: per-beat inference with a three-member INT8 ensemble; the beat and its RR features feed every member. Each decision waits one beat because $RR^{\mathrm{post}}$ needs the next R-peak. Bottom: development protocol; the frozen model is evaluated once on DS2, which had also been used during development (Section~\ref{sec:discussion}).}
 \label{fig:system}
 \end{figure*}
 
 \subsection{Dataset and Inter-Patient Protocol}
-We use the MIT-BIH Arrhythmia Database~\cite{moody2001impact,goldberger2000physiobank}, obtained from PhysioNet and verified against its published SHA-256 checksums (all 144 record, header and annotation files matched). The paced records 102, 104, 107 and 217 are excluded. Annotation symbols are mapped to AAMI classes as N\,=\,\{N, L, R, e, j\}, SVEB\,=\,\{A, a, J, S\}, VEB\,=\,\{V, E\}, F\,=\,\{F\} and Q\,=\,\{/, f, Q\}~\cite{aami2012ec57}. Records follow the DS1/DS2 split of~\cite{dechazal2004automatic}. Five DS1 records, chosen so that SVEB, VEB and F all occur, form a patient-wise validation set used for every training and design decision. Record 208, which holds most DS1 F beats, stays in training. Table~\ref{tab:data} lists the splits; Fig.~\ref{fig:classdist} shows the class imbalance.
+We use the MIT-BIH Arrhythmia Database~\cite{moody2001impact,goldberger2000physiobank}, obtained from PhysioNet and verified against its published SHA-256 checksums (all 144 record, header and annotation files matched). The paced records 102, 104, 107 and 217 are excluded. Annotation symbols are mapped to AAMI classes as N\,=\,\{N, L, R, e, j\}, SVEB\,=\,\{A, a, J, S\}, VEB\,=\,\{V, E\}, F\,=\,\{F\} and Q\,=\,\{/, f, Q\}~\cite{aami2012ec57}. Records follow the canonical DS1/DS2 record split of~\cite{dechazal2004automatic}. It is record-disjoint but not strictly patient-disjoint: records 201 (DS1) and 202 (DS2) come from the same patient. Five DS1 records, chosen so that SVEB, VEB and F all occur, form the validation set used for model selection. Record 208, which holds most DS1 F beats, stays in training. Table~\ref{tab:data} lists the splits; Fig.~\ref{fig:classdist} shows the class imbalance.
 
 Our per-class beat counts match the reference counts of~\cite{dechazal2004automatic} to within 0.1\%. The small difference comes from discarding the first and last beat of each record, whose RR intervals are undefined, and beats whose window would cross the record boundary.
 
@@ -233,7 +233,7 @@ Test (DS2) & 22 & 49,668 & 44,218 & 1,836 & 3,219 & 388 & 7 \\
 \end{figure}
 
 \subsection{Preprocessing and Beat Segmentation}
-The MLII lead is selected by name (it is the second channel in record 114). It is filtered by a fourth-order zero-phase Butterworth band-pass filter (0.5--40~Hz), which removes baseline wander from respiration and high-frequency noise. Around each annotated R-peak $r$ we cut the window $[r-90, r+160)$ samples, about 250~ms before and 444~ms after the peak, and normalize each beat $\mathbf{x}$ independently:
+The MLII lead is selected by name (it is the second channel in record 114). It is filtered by a fourth-order zero-phase Butterworth band-pass filter (0.5--40~Hz), which removes baseline wander from respiration and high-frequency noise. This filter runs forwards and backwards over the whole record and therefore needs future samples; a device must use a causal filter, whose effect on accuracy is not yet evaluated. Around each annotated R-peak $r$ we cut the window $[r-90, r+160)$ samples, about 250~ms before and 444~ms after the peak, and normalize each beat $\mathbf{x}$ independently:
 \begin{equation}
 \tilde{\mathbf{x}} = (\mathbf{x}-\mu_{\mathbf{x}})/(\sigma_{\mathbf{x}}+\epsilon),
 \end{equation}
@@ -334,14 +334,14 @@ For full-integer post-training quantization (PTQ), real values are represented a
 \begin{equation}
 W'=W\,\tfrac{\gamma}{\sqrt{\sigma^2+\epsilon}},\qquad b'=\beta-\tfrac{\mu\gamma}{\sqrt{\sigma^2+\epsilon}}.
 \end{equation}
-For quantization-aware training (QAT), the network is rebuilt in exactly the graph TensorFlow Lite executes (folded (1$\times k$) Conv2D layers). Fake quantization is inserted on the convolutions, the ReLUs and the dense layers. Activation ranges are calibrated before fine-tuning, and the fine-tuning epoch is selected on validation. Multiply-accumulates (MACs) are counted from the converted graph as $L_{\mathrm{out}}\,k\,C_{\mathrm{in}}C_{\mathrm{out}}$ per convolution and $d_{\mathrm{in}}d_{\mathrm{out}}$ per dense layer. Peak activation memory is the maximum, over the execution order, of the bytes of all simultaneously live activation tensors. Weights stay in flash, so this is a lower bound on the TensorFlow Lite Micro~\cite{david2021tflm} tensor arena, which adds alignment and bookkeeping.
+For quantization-aware training (QAT), the network is rebuilt in exactly the graph TensorFlow Lite executes (folded (1$\times k$) Conv2D layers). Fake quantization is inserted on the convolutions, the ReLUs and the dense layers. Activation ranges are calibrated before fine-tuning, and the fine-tuning epoch is selected on validation. Multiply-accumulates (MACs) are counted from the converted graph as $L_{\mathrm{out}}\,k\,C_{\mathrm{in}}C_{\mathrm{out}}$ per convolution and $d_{\mathrm{in}}d_{\mathrm{out}}$ per dense layer. Peak activation memory is the maximum, over the execution order, of the bytes of all simultaneously live activation tensors. Weights stay in flash, so this is a lower bound on the TensorFlow Lite Micro~\cite{david2021tflm} tensor arena, which adds alignment and bookkeeping. It also excludes the interpreter, the ECG and filter buffers and the 5-min RR history, so total runtime RAM is higher and remains to be measured on the device.
 
 \subsection{Ensemble and Decision Rule}
 Training with different seeds produced large differences in minority-class results, so the final classifier averages the dequantized softmax outputs of the $M=3$ INT8 members~\cite{lakshminarayanan2017ensembles},
 \begin{equation}
 \hat{y}=\arg\max_c \tfrac{1}{M}\textstyle\sum_{m=1}^{M} p_m(c\mid\mathbf{x}).
 \end{equation}
-On a microcontroller the members run one after another in the same tensor arena, so peak RAM stays that of one member while weights and MACs add up. We also tested a validation-tuned SVEB threshold (SVEB only if $\bar{p}(\mathrm{SVEB})\ge t$) and two ablations (Section~\ref{sec:ablation}). The selection rule was fixed before the candidates' validation results were seen: the INT8 ensemble with the highest validation F1 over N, SVEB and VEB wins. The chosen model was then frozen with a SHA-256 manifest and evaluated once on DS2 by a script that refuses to run twice.
+On a microcontroller the members run one after another in the same tensor arena, so peak RAM stays that of one member while weights and MACs add up. We also tested a validation-tuned SVEB threshold (SVEB only if $\bar{p}(\mathrm{SVEB})\ge t$) and two ablations (Section~\ref{sec:ablation}). The selection rule was fixed before the candidates' validation results were seen: the INT8 ensemble with the highest validation F1 over N, SVEB and VEB wins. The chosen model was then frozen with a SHA-256 manifest and evaluated once on DS2 by a script that refuses to run twice. DS2 had, however, also been used during development (Section~\ref{sec:discussion}).
 
 %=====================================================================
 \section{Results}
@@ -378,7 +378,7 @@ $p$ & Aug. & Clip & F1$_{\mathrm{N,S,V}}$ & SVEB Se & SVEB +P & VEB Se & VEB +P 
 \end{figure}
 
 \subsection{Inter-Patient Test Results}
-Table~\ref{tab:final} reports the frozen INT8 ensemble on DS2 and Fig.~\ref{fig:cm} its confusion matrix. VEB is detected reliably (Se 92.89\%, +P 92.71\%, FPR 0.51\%). SVEB sensitivity is 74.46\%, but only one SVEB call in three is correct. F beats are not recognized, and the reasons are discussed in Section~\ref{sec:discussion}.
+Table~\ref{tab:final} reports the frozen INT8 ensemble on DS2 and Fig.~\ref{fig:cm} its confusion matrix. \textbf{Two results qualify everything else: F sensitivity is 0\%, and SVEB positive predictivity is only 33.43\%, so two in three SVEB calls are false alarms.} VEB is detected reliably (Se 92.89\%, +P 92.71\%, FPR 0.51\%), and SVEB sensitivity is 74.46\%. The F failure is discussed in Section~\ref{sec:discussion}.
 
 \begin{table}[t]
 \caption{Frozen INT8 Ensemble on DS2 (Inter-Patient, \%)}
@@ -429,7 +429,7 @@ INT8, single & 85.70$\pm$2.73 & 56.31$\pm$0.63 & 86.66$\pm$3.02 & 17.73$\pm$2.88
 Table~\ref{tab:quant} gives the cost of one member (seed 0) in FP32, PTQ and QAT, and of the final ensemble. INT8 shrinks the weights 3.7$\times$, from 18.8~KB to 5.0~KB, and peak activation memory 4$\times$, from 15.7~KB to 3.9~KB (Fig.~\ref{fig:mem}). The accuracy cost is 0.5--0.6 points; Fig.~\ref{fig:quant} breaks it down by class. QAT matched FP32 on validation already before fine-tuning (validation score 78.0 vs.\ 78.1), so fine-tuning selected epoch 0 and QAT brought no accuracy gain. Its smaller file and activation footprint come from the leaner exported graph, which has fewer reshape operators. The only noticeable quantization cost is SVEB sensitivity (78.4\% to 72.1\% for one member, 81.0\% to 74.5\% for the ensemble); VEB and N are essentially unchanged.
 
 \begin{table}[t]
-\caption{Model Cost and DS2 Accuracy Before and After Quantization}
+\caption{Model Cost (Estimated Peak Activations) and DS2 Accuracy Before and After Quantization}
 \label{tab:quant}
 \centering
 \footnotesize
@@ -462,7 +462,7 @@ INT8 QAT (1 member) & 13.8 & 5.0 & 254 & 2.9 & 82.97 & 72.28 \\
 \label{fig:mem}
 \end{figure}
 
-Against the ESP32-WROOM-32E~\cite{espressif2023esp32}, the ensemble's activations occupy about 0.8\% of the 520~KB SRAM and its model files about 1.4\% of the smallest (4~MB) flash. At 762k MACs per beat and an assumed 10 clock cycles per MAC (an assumption to be verified on hardware), inference would take about 32~ms per beat at 240~MHz. That is about 4\% of the interval between beats at 75~bpm. For comparison, Kim et al.~\cite{kim2024ultraedge} report 118~kB of RAM for a 25~kB model on a Cortex-M4.
+Against the ESP32-WROOM-32E~\cite{espressif2023esp32}, the ensemble's estimated activation memory is about 0.8\% of the 520~KB SRAM and its 55.9~KB of model files about 1.4\% of the smallest (4~MB) flash. Total runtime RAM, including the interpreter and signal buffers, has not yet been measured. At 762k MACs per beat and an assumed 10 clock cycles per MAC (an assumption to be verified on hardware), inference would take about 32~ms per beat at 240~MHz. That is about 4\% of the interval between beats at 75~bpm. Kim et al.~\cite{kim2024ultraedge} report a measured 118~kB of RAM for a 25~kB model on a Cortex-M4, which is not directly comparable with our estimate.
 
 \subsection{Error Analysis: SVEB False Alarms}
 Of the 2,668 normal beats called SVEB, 86.5\% come from just five of the 22 test patients (Fig.~\ref{fig:fa}). We read the rhythm annotations of these records: four contain atrial fibrillation or flutter, which covers 37--97\% of their beats, and the fifth (231) has 2:1 AV block. In AF the heart rhythm is irregular throughout, so normal beats often arrive early and match the RR pattern the model associates with SVEB. These errors are confident: the mean SVEB probability of the false alarms is 0.78. A validation-tuned decision threshold therefore cannot remove them. The best threshold ($t=0.51$) improved the validation score by only 0.15 points (Fig.~\ref{fig:thr}), and on DS2 it lowered SVEB sensitivity from 74.46\% to 67.70\% without improving +P (33.05\%). We kept plain argmax.
@@ -515,7 +515,7 @@ Causal +Irreg. & 76.00 & 57.93 & 78.10 & 39.56 & 86.64 & 78.02 & 18.0 \\
 \end{table}
 
 \subsection{Comparison with Published Work}
-Table~\ref{tab:compare} places our result next to studies discussed above, separating results on the canonical DS1/DS2 split from other partitions. On SVEB, our sensitivity matches de Chazal et al.~\cite{dechazal2004automatic} (75.9\%), but our positive predictivity is lower (33.4\% vs.\ 38.5\%). On VEB, our model is clearly stronger (92.9/92.7\% vs.\ 77.7/81.9\%). Among studies with embedded evidence, ours is the only one that combines the canonical inter-patient split with a microcontroller-class memory footprint.
+Table~\ref{tab:compare} places our result next to studies discussed above, separating results on the canonical DS1/DS2 split from other partitions. On SVEB, our sensitivity matches de Chazal et al.~\cite{dechazal2004automatic} (75.9\%), but our positive predictivity is lower (33.4\% vs.\ 38.5\%). On VEB, our model is clearly stronger (92.9/92.7\% vs.\ 77.7/81.9\%). Among studies with embedded evidence, ours is the only one that combines the canonical DS1/DS2 record split with an estimated microcontroller-class memory footprint.
 
 \begin{table}[t]
 \caption{Comparison with Published Work}
@@ -534,7 +534,7 @@ Ref. & Split & SVEB Se/+P & VEB Se/+P & Footprint \\
 \cite{farag2023tiny} & Inter-pat. & \multicolumn{2}{c}{--} & 15~kB, 12--24~MB RAM \\
 \cite{busia2025tiny} & Intra-pat. & \multicolumn{2}{c}{Acc.\ 98.97$^{b}$} & 6.6k params, GAP9 \\
 \midrule
-\textbf{Ours} & \textbf{DS1/DS2} & \textbf{74.5 / 33.4} & \textbf{92.9 / 92.7} & \textbf{15.1~KB, 3.9~KB act.} \\
+\textbf{Ours} & \textbf{DS1/DS2} & \textbf{74.5 / 33.4} & \textbf{92.9 / 92.7} & \textbf{15.1~KB, est.\ 3.9~KB act.} \\
 \bottomrule
 \multicolumn{5}{@{}l@{}}{\scriptsize $^{b}$Overall figures as summarized in~\cite{silva2026review}; per-class values not comparable.}
 \end{tabular}}
@@ -544,18 +544,18 @@ Ref. & Split & SVEB Se/+P & VEB Se/+P & Footprint \\
 \section{Discussion}
 \label{sec:discussion}
 %=====================================================================
-\textbf{Gaps addressed.} The model is AAMI-compliant, evaluated on the canonical inter-patient split and costed against a microcontroller budget (G1--G3). Size, MACs and peak activation memory are reported in one consistent format (G4), and per-class metrics are reported for every class, including the failures (G5). Its 87.3\% accuracy is lower than the 95--99\% common in the literature, but it is measured on unseen patients. Most higher figures come from intra-patient splits.
+\textbf{Gaps addressed.} The model is AAMI-compliant, evaluated on the canonical DS1/DS2 record split and costed, by estimation, against a microcontroller budget (G1--G3). Size, MACs and peak activation memory are reported in one consistent format (G4), and per-class metrics are reported for every class, including the failures (G5). Its 87.3\% accuracy is lower than the 95--99\% common in the literature, but it is measured on records of patients not seen in training. Most higher figures come from intra-patient splits.
 
 \textbf{Fusion beats.} No configuration learned F in a way that transfers. Almost all F training beats (372 of 398) come from a single patient (record 208), while most test F beats come from another (record 213). The model learns that patient rather than fusion morphology. This failure is common under the inter-patient protocol and is the clearest example of gap G5.
 
-\textbf{Use of the test set.} DS2 was evaluated seven times during development. These were the first baseline, the tuned configuration before RR clipping, the quantization comparison, the retrained configuration, the ensemble, the threshold check and the frozen model with its ablations. One design change followed a DS2 observation. The quantization comparison exposed an SVEB drop, which we traced to the RR input range and fixed by clipping. Clipping removes a physiological artefact (annotation gaps), and it also improved validation sensitivity by 4.8 points, but the DS2 results are not a strictly untouched estimate. Every other choice was made on validation, and the frozen model was evaluated exactly once.
+\textbf{Use of the test set.} DS2 was evaluated seven times in total: six times during development (the first baseline, the tuned configuration before RR clipping, the quantization comparison, the retrained configuration, the ensemble and the threshold check) and once for the frozen model with its ablations. One design change followed a DS2 observation. The quantization comparison exposed an SVEB drop, which we traced to the RR input range and fixed by clipping. Clipping removes a physiological artefact (annotation gaps), and it also improved validation sensitivity by 4.8 points, but the DS2 results are not a strictly untouched estimate. Every other choice was made on validation, and the frozen model was evaluated exactly once.
 
-\textbf{Other limitations.} Records 201 (in our validation set) and 202 (in DS2) come from the same patient, an accepted exception of the canonical split. The validation set has no AF patient, which is why the irregularity feature could not be selected. We use reference R-peak annotations rather than a detector. Embedded costs are estimated from the converted graphs, not yet measured on the ESP32.
+\textbf{Other limitations.} Records 201 (in our validation set) and 202 (in DS2) come from the same patient, an accepted exception of the canonical split. The validation set has no AF patient, which is why the irregularity feature could not be selected. We use reference R-peak annotations rather than a detector. Embedded costs are estimated from the converted graphs, not yet measured on the ESP32. The zero-phase band-pass filter is offline-only and must be replaced by a causal filter on a device, and each decision waits one beat for $RR^{\mathrm{post}}$.
 
 %=====================================================================
 \section{Conclusion and Future Work}
 %=====================================================================
-We presented a three-member INT8 1D-CNN ensemble for five-class AAMI heartbeat classification that meets all three E3C criteria. On unseen patients it detects 92.9\% of ventricular and 74.5\% of supraventricular ectopic beats. It needs 15.1~KB of weights and about 4~KB of working memory, and quantization costs almost no accuracy. The main remaining weakness, SVEB false alarms, is concentrated in atrial-fibrillation patients. A rhythm-irregularity feature addresses it effectively, but its benefit is visible only with AF patients in the validation data. Future work will (i) rebuild the validation protocol with AF records, or use cross-validation over DS1 patients, before re-selecting; (ii) deploy the frozen model with TensorFlow Lite Micro on an ESP32-WROOM-32E and measure latency, arena size and energy; (iii) add an on-device R-peak detector; and (iv) study F-class generalization, for example with data from additional databases.
+We presented a three-member INT8 1D-CNN ensemble for five-class AAMI heartbeat classification that addresses all three E3C criteria, with embedded feasibility so far assessed by estimates rather than on-device measurement. On the DS2 records of the canonical split it detects 92.9\% of ventricular and 74.5\% of supraventricular ectopic beats with 15.1~KB of INT8 weights and an estimated 3.9~KB of peak activations, and quantization costs almost no accuracy. It does not recognize fusion beats (0\% sensitivity), and only 33.4\% of its SVEB calls are correct; these false alarms are concentrated in atrial-fibrillation patients. Because DS2 was also used during development, the figures are not a strictly untouched test estimate. A rhythm-irregularity feature addresses it effectively, but its benefit is visible only with AF patients in the validation data. Future work will (i) rebuild the validation protocol with AF records, or use cross-validation over DS1 patients, before re-selecting; (ii) replace the zero-phase filter with a causal one and deploy the frozen model with TensorFlow Lite Micro on an ESP32-WROOM-32E to measure latency, total RAM and energy; (iii) add an on-device R-peak detector; and (iv) study F-class generalization, for example with data from additional databases.
 
 \bibliographystyle{IEEEtran}
 \bibliography{refs}
